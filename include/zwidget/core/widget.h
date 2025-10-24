@@ -226,6 +226,9 @@ private:
 	void OnWindowActivated() override;
 	void OnWindowDeactivated() override;
 	void OnWindowDpiScaleChanged() override;
+	void SetBitmapTexture(void* texture) override;
+	void* GetBitmapTexture() override { return m_BitmapTexture; }
+	void* TakeBitmapTexture() override;
 
 	void NotifySubscribers(const WidgetEvent type);
 
@@ -246,6 +249,7 @@ private:
 
 	std::string WindowTitle;
 	std::vector<std::shared_ptr<Image>> WindowIcon;
+public:
 	std::unique_ptr<DisplayWindow> DispWindow;
 	std::unique_ptr<Canvas> DispCanvas;
 	Widget* FocusWidget = nullptr;
@@ -269,6 +273,8 @@ private:
 	std::unordered_set<Widget*> Subscriptions;
 
 	Layout* m_Layout = nullptr;
+
+	void* m_BitmapTexture = nullptr;
 
 	friend class Timer;
 	friend class OpenFileDialog;

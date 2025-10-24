@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.11)
-project(zwidget)
+project(zwidget LANGUAGES CXX OBJCXX)
 
 option(ZWIDGET_USE_SDL2_BACKEND "Enable SDL2 backend for ZWidget" OFF)
-message(STATUS "HAVE_METAL is ${HAVE_METAL}")
+#set(HAVE_METAL OFF CACHE INTERNAL "" FORCE)
 
 if (UNIX AND NOT APPLE)
 	include(FindPkgConfig)
@@ -22,7 +22,7 @@ endif()
 
 # SDL2 finding stuff
 # Optional on all platforms
-#find_package(SDL2 QUIET)
+find_package(SDL2 QUIET)
 if(NOT ${SDL2_FOUND})
 	include(FindPkgConfig)
 	pkg_search_module(SDL2 sdl2)
@@ -45,7 +45,6 @@ set(ZWIDGET_SOURCES
 	src/core/picopng/picopng.h
 	src/core/nanosvg/nanosvg.cpp
 	src/core/nanosvg/nanosvg.h
-	src/core/nanosvg/nanosvgrast.h
 	src/widgets/lineedit/lineedit.cpp
 	src/widgets/mainwindow/mainwindow.cpp
 	src/widgets/menubar/menubar.cpp
@@ -77,46 +76,8 @@ set(ZWIDGET_SOURCES
 	src/systemdialogs/save_file_dialog.cpp
 )
 
-set(ZWIDGET_INCLUDES
-	include/zwidget/core/canvas.h
-	include/zwidget/core/colorf.h
-	include/zwidget/core/font.h
-	include/zwidget/core/image.h
-	include/zwidget/core/rect.h
-	include/zwidget/core/pathfill.h
-	include/zwidget/core/span_layout.h
-	include/zwidget/core/timer.h
-	include/zwidget/core/widget.h
-	include/zwidget/core/theme.h
-	include/zwidget/core/utf8reader.h
-	include/zwidget/core/resourcedata.h
-	include/zwidget/widgets/lineedit/lineedit.h
-	include/zwidget/widgets/mainwindow/mainwindow.h
-	include/zwidget/widgets/menubar/menubar.h
-	include/zwidget/widgets/scrollbar/scrollbar.h
-	include/zwidget/widgets/statusbar/statusbar.h
-	include/zwidget/widgets/textedit/textedit.h
-	include/zwidget/widgets/toolbar/toolbar.h
-	include/zwidget/widgets/toolbar/toolbarbutton.h
-	include/zwidget/widgets/imagebox/imagebox.h
-	include/zwidget/widgets/textlabel/textlabel.h
-	include/zwidget/widgets/pushbutton/pushbutton.h
-	include/zwidget/widgets/checkboxlabel/checkboxlabel.h
-	include/zwidget/widgets/listview/listview.h
-	include/zwidget/widgets/tabwidget/tabwidget.h
-	include/zwidget/widgets/layout/hboxlayout.h
-	include/zwidget/widgets/layout/vboxlayout.h
-	include/zwidget/window/window.h
-	include/zwidget/window/x11nativehandle.h
-	include/zwidget/window/waylandnativehandle.h
-	include/zwidget/window/win32nativehandle.h
-	include/zwidget/window/sdl2nativehandle.h
-	include/zwidget/systemdialogs/open_folder_dialog.h
-	include/zwidget/systemdialogs/open_file_dialog.h
-	include/zwidget/systemdialogs/save_file_dialog.h
-)
-
 set(ZWIDGET_WIN32_SOURCES
+	src/core/resourceloader_win.cpp
 	src/window/win32/win32_display_backend.cpp
 	src/window/win32/win32_display_backend.h
 	src/window/win32/win32_display_window.cpp
@@ -140,6 +101,7 @@ set(ZWIDGET_DBUS_SOURCES
 )
 
 set(ZWIDGET_COCOA_SOURCES
+	src/core/resourceloader_mac.mm
 	src/window/cocoa/cocoa_open_file_dialog.mm
 	src/window/cocoa/cocoa_save_file_dialog.mm
 	src/window/cocoa/cocoa_open_folder_dialog.mm
@@ -233,7 +195,7 @@ set(ZWIDGET_COMPILE_OPTIONS)
 if(WIN32)
 	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES} ${ZWIDGET_WIN32_SOURCES})
 	set(ZWIDGET_DEFINES -DUNICODE -D_UNICODE)
-	set(ZWIDGET_LINK_OPTIONS)
+	set(ZWIDGET_LINK_OPTIONS Advapi32.lib Shell32.lib)
 	if(MSVC)
 		# Use all cores for compilation
 		set(ZWIDGET_COMPILE_OPTIONS ${ZWIDGET_COMPILE_OPTIONS} /MP)
@@ -250,7 +212,6 @@ if(WIN32)
 elseif(APPLE)
 	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES}
 		${ZWIDGET_COCOA_SOURCES}
-		
 	)
 	set_source_files_properties(src/window/cocoa/cocoa_display_backend.mm PROPERTIES COMPILE_FLAGS "-x objective-c++ -fobjc-arc")
 	set_source_files_properties(src/window/cocoa/cocoa_open_file_dialog.mm PROPERTIES COMPILE_FLAGS "-x objective-c++ -fobjc-arc")
@@ -269,18 +230,17 @@ elseif(APPLE)
 	find_library(METAL_FRAMEWORK Metal)
 	find_package(Vulkan COMPONENTS MoltenVK)
 
-
-	    find_library(OPENGL_FRAMEWORK OpenGL)
-		if (NOT OPENGL_FRAMEWORK)
-			message(FATAL_ERROR "OpenGL framework not found")
-		endif()
+	find_library(OPENGL_FRAMEWORK OpenGL)
+	if (NOT OPENGL_FRAMEWORK)
+		message(FATAL_ERROR "OpenGL framework not found")
+	endif()
 	
-		find_library(UNIFORMTYPEIDENTIFIERS_FRAMEWORK UniformTypeIdentifiers)
-		if (NOT UNIFORMTYPEIDENTIFIERS_FRAMEWORK)
-			message(FATAL_ERROR "UniformTypeIdentifiers framework not found")
-		endif()
-	else()
-	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES} ${ZWIDGET_X11_SOURCES})
+	find_library(UNIFORMTYPEIDENTIFIERS_FRAMEWORK UniformTypeIdentifiers)
+	if (NOT UNIFORMTYPEIDENTIFIERS_FRAMEWORK)
+		message(FATAL_ERROR "UniformTypeIdentifiers framework not found")
+	endif()
+elseif(UNIX AND NOT APPLE)
+	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES} src/core/resourceloader_unix.cpp)
 	set(ZWIDGET_LIBS ${CMAKE_DL_LIBS} -lX11 -lXi)
 	set(ZWIDGET_DEFINES -DUNIX -D_UNIX -DUSE_X11)
 	set(ZWIDGET_LINK_OPTIONS -pthread)
@@ -299,10 +259,10 @@ elseif(APPLE)
 	endif()
 endif()
 
-if(SDL2_FOUND AND NOT WIN32 AND ZWIDGET_USE_SDL2_BACKEND)
-	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES} ${ZWIDGET_SDL2_SOURCES})
-	set(ZWIDGET_DEFINES ${ZWIDGET_DEFINES} -DUSE_SDL2)
-endif()
+#if(SDL2_FOUND AND NOT WIN32 AND ZWIDGET_USE_SDL2_BACKEND)
+#	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES} ${ZWIDGET_SDL2_SOURCES})
+#	set(ZWIDGET_DEFINES ${ZWIDGET_DEFINES} -DUSE_SDL2)
+#endif()
 
 if(MSVC)
 	set(CXX_WARNING_FLAGS /W3)
@@ -310,15 +270,15 @@ else()
 	set(CXX_WARNING_FLAGS -Wall -Wpedantic)
 endif()
 
-add_library(zwidget STATIC ${ZWIDGET_SOURCES} ${ZWIDGET_INCLUDES})
+add_library(zwidget STATIC ${ZWIDGET_SOURCES})
 target_compile_options(zwidget PRIVATE ${ZWIDGET_COMPILE_OPTIONS})
 target_compile_definitions(zwidget PRIVATE ${ZWIDGET_DEFINES})
 target_include_directories(zwidget PRIVATE ${ZWIDGET_INCLUDE_DIRS})
 target_link_options(zwidget PRIVATE ${ZWIDGET_LINK_OPTIONS})
 target_link_libraries(zwidget PRIVATE ${ZWIDGET_LIBS} ${COCOA_FRAMEWORK} ${OPENGL_FRAMEWORK} ${UNIFORMTYPEIDENTIFIERS_FRAMEWORK})
+    target_link_libraries(zwidget PUBLIC "-framework Metal" "-framework Foundation" "-framework QuartzCore")
     target_compile_definitions(zwidget PRIVATE HAVE_OPENGL)
 if (METAL_FRAMEWORK)
-    target_link_libraries(zwidget PRIVATE ${METAL_FRAMEWORK})
     target_compile_definitions(zwidget PRIVATE HAVE_METAL)
 endif()
 if(Vulkan_FOUND)
@@ -340,45 +300,46 @@ if(MSVC)
 	set_property(TARGET zwidget PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-option(ZWIDGET_BUILD_EXAMPLE "Build the zwidget example application" ON)
+option(ZWIDGET_BUILD_EXAMPLE "Build the zwidget example application" OFF)
 
 if(ZWIDGET_BUILD_EXAMPLE)
-	add_executable(zwidget_example WIN32
-		example/example.cpp
-		example/picopng.cpp
-		example/picopng.h
-	)
-	target_compile_options(zwidget_example PRIVATE ${CXX_WARNING_FLAGS})
+    add_executable(zwidget_example
+        example/example.cpp
+        example/picopng.cpp
+        example/picopng.h
+        example/example_common.h
+        example/example_ui.cpp
+    )
 
-	add_custom_command(
-		TARGET zwidget_example POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy
-			"${CMAKE_CURRENT_SOURCE_DIR}/example/banner.png"
-			"${CMAKE_CURRENT_BINARY_DIR}/banner.png"
-		COMMAND ${CMAKE_COMMAND} -E copy
-			"${CMAKE_CURRENT_SOURCE_DIR}/example/OpenSans.ttf"
-			"${CMAKE_CURRENT_BINARY_DIR}/OpenSans.ttf"
-	)
+    target_compile_options(zwidget_example PRIVATE ${CXX_WARNING_FLAGS})
+    target_include_directories(zwidget_example PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/example)
+    target_link_libraries(zwidget_example PRIVATE zwidget)
+    set_target_properties(zwidget_example PROPERTIES CXX_STANDARD 20)
 
-	target_include_directories(zwidget_example PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/example)
-	target_link_libraries(zwidget_example PRIVATE zwidget)
+    if(WIN32)
+        target_compile_definitions(zwidget_example PRIVATE UNICODE _UNICODE)
+        target_link_libraries(zwidget_example PRIVATE gdi32 user32 shell32 comdlg32)
+        if(MSVC)
+            set_property(TARGET zwidget_example PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        endif()
+    elseif(APPLE)
+        target_link_libraries(zwidget_example PRIVATE "-framework Cocoa -framework OpenGL -framework Metal -framework UniformTypeIdentifiers -framework CoreFoundation")
+        if(MSVC)
+            set_property(TARGET zwidget_example PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        endif()
+    endif()
 
-	if(WIN32)
-		target_compile_definitions(zwidget_example PRIVATE UNICODE _UNICODE)
-		target_link_libraries(zwidget_example PRIVATE gdi32 user32 shell32 comdlg32)
-	elseif(APPLE)
-		target_link_libraries(zwidget_example PRIVATE "-framework Cocoa -framework OpenGL")
-	else()
-		target_link_libraries(zwidget_example PRIVATE ${ZWIDGET_LIBS})
-	endif()
+    if(SDL2_FOUND)
+        target_link_libraries(zwidget_example PRIVATE ${SDL2_LIBRARY})
+    endif()
 
-	if(SDL2_FOUND)
-		target_link_libraries(zwidget_example PRIVATE SDL2::SDL2)
-	endif()
-
-	set_target_properties(zwidget_example PROPERTIES CXX_STANDARD 20)
-
-	if(MSVC)
-		set_property(TARGET zwidget_example PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-	endif()
+    add_custom_command(
+        TARGET zwidget_example POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_SOURCE_DIR}/example/banner.png"
+            "${CMAKE_CURRENT_BINARY_DIR}/banner.png"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_SOURCE_DIR}/example/OpenSans.ttf"
+            "${CMAKE_CURRENT_BINARY_DIR}/OpenSans.ttf"
+    )
 endif()

@@ -10,5 +10,9 @@ struct SingleFontData
 	std::string language;
 };
 
-std::vector<SingleFontData> LoadWidgetFontData(const std::string& name);
-std::vector<uint8_t> LoadWidgetData(const std::string& name);
+class ResourceLoader
+{
+public:
+	static std::vector<SingleFontData> LoadWidgetFontData(const std::string& name);
+	static std::vector<uint8_t> LoadWidgetData(const std::string& name);
+};

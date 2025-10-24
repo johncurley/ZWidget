@@ -3,6 +3,7 @@
 #include <vector> // Required for std::vector
 #include <map>
 #include <dlfcn.h>
+#include <cmath>
 #ifdef HAVE_VULKAN
 #define VK_USE_PLATFORM_METAL_EXT
 #include <vulkan/vulkan.h>
@@ -117,12 +118,12 @@ InputKey keycode_to_inputkey(unsigned short keycode)
         {117, InputKey::Delete},
         {119, InputKey::End},
         {121, InputKey::PageDown},
-    {122, InputKey::F1},
-    {120, InputKey::F2},
-    {99, InputKey::F3},
-    {118, InputKey::F4},
-    {96, InputKey::F5},
-    {97, InputKey::F6},
+        {122, InputKey::F1},
+        {120, InputKey::F2},
+        {99, InputKey::F3},
+        {118, InputKey::F4},
+        {96, InputKey::F5},
+        {97, InputKey::F6},
         {98, InputKey::F7},
         {100, InputKey::F8},
         {101, InputKey::F9},
@@ -150,9 +151,12 @@ public:
     NSWindow* window = nil;
     ZWidgetWindowDelegate* delegate = nil;
     NSBitmapImageRep* bitmapRep = nil;
+    CGImageRef cgImage = nullptr;
     std::map<InputKey, bool> keyState;
     bool mouseCaptured = false;
     RenderAPI renderAPI = RenderAPI::Unspecified;
+
+    CVDisplayLinkRef displayLink = nullptr;
 
     CGColorSpaceRef colorSpace = nullptr;
     CGContextRef bitmapContext = nullptr;
@@ -175,13 +179,43 @@ public:
     // Declare methods, but implement them outside the struct
     void initMetal(ZWidgetView* view);
     void initOpenGL(ZWidgetView* view);
+    void updateDrawableSize(CGSize size);
+
+    CVReturn displayLinkOutputCallback(CVDisplayLinkRef displayLink, const CVTimeStamp* inNow, const CVTimeStamp* inOutputTime, CVOptionFlags flagsIn, CVOptionFlags* flagsOut, void* displayLinkContext);
+    void startDisplayLink();
+    void stopDisplayLink();
 
     ~CocoaDisplayWindowImpl()
     {
         if (bitmapContext) CGContextRelease(bitmapContext);
         if (colorSpace) CGColorSpaceRelease(colorSpace);
+        if (cgImage) CGImageRelease(cgImage);
     }
 };
+
+static CVReturn DisplayLinkOutputCallback(CVDisplayLinkRef displayLink, const CVTimeStamp* inNow, const CVTimeStamp* inOutputTime, CVOptionFlags flagsIn, CVOptionFlags* flagsOut, void* displayLinkContext)
+{
+    CocoaDisplayWindowImpl* impl = (CocoaDisplayWindowImpl*)displayLinkContext;
+    return impl->displayLinkOutputCallback(displayLink, inNow, inOutputTime, flagsIn, flagsOut, displayLinkContext);
+}
+
+void CocoaDisplayWindowImpl::startDisplayLink()
+{
+    if (displayLink) return;
+
+    CVDisplayLinkCreateWithActiveCGDisplays(&displayLink);
+    CVDisplayLinkSetOutputCallback(displayLink, &DisplayLinkOutputCallback, this);
+    CVDisplayLinkStart(displayLink);
+}
+
+void CocoaDisplayWindowImpl::stopDisplayLink()
+{
+    if (!displayLink) return;
+
+    CVDisplayLinkStop(displayLink);
+    CVDisplayLinkRelease(displayLink);
+    displayLink = nullptr;
+}
 
 @interface ZWidgetView : NSView
 {
@@ -191,13 +225,6 @@ public:
 @end
 
 @implementation ZWidgetView
-
-#ifdef HAVE_METAL
-+ (Class)layerClass
-{
-    return [CAMetalLayer class];
-}
-#endif
 
 - (id)initWithImpl:(CocoaDisplayWindowImpl*)d
 {
@@ -209,6 +236,7 @@ public:
     }
     return self;
 }
+
 - (BOOL)isOpaque
 {
     return YES;
@@ -217,6 +245,12 @@ public:
 {
     return YES;
 }
+
+- (void)setFrame:(NSRect)frame
+{
+    [super setFrame:frame];
+    impl->updateDrawableSize(frame.size);
+}
 - (BOOL)acceptsFirstResponder
 {
     return YES;
@@ -224,9 +258,56 @@ public:
 
 - (void)drawRect:(NSRect)dirtyRect
 {
-    if (impl && impl->bitmapRep)
+    NSLog(@"ZWidgetView: drawRect called");
+    if (!impl) return;
+
+    if (impl->renderAPI == RenderAPI::Bitmap)
     {
-        [impl->bitmapRep drawInRect:self.bounds];
+        if (impl->cgImage)
+        {
+            NSLog(@"drawRect: impl->cgImage is NOT null. Drawing image.");
+            CGContextRef context = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
+            CGContextDrawImage(context, NSRectToCGRect(self.bounds), impl->cgImage);
+        }
+        else
+        {
+            NSLog(@"drawRect: impl->cgImage IS null. Not drawing image.");
+        }
+    }
+    else if (impl->renderAPI == RenderAPI::OpenGL)
+    {
+#ifdef HAVE_OPENGL
+        if (impl->openglContext)
+        {
+            [impl->openglContext makeCurrentContext];
+            [impl->openglContext flushBuffer];
+        }
+#endif
+    }
+    else if (impl->renderAPI == RenderAPI::Metal)
+    {
+#ifdef HAVE_METAL
+        // Metal rendering is handled by the CVDisplayLink callback
+        // No need to do anything here directly
+#endif
+    }
+}
+
+- (void)viewDidMoveToWindow
+{
+    if ([self window])
+    {
+        NSLog(@"ZWidgetView: viewDidMoveToWindow with windowHost: %p", impl->windowHost);
+        impl->windowHost->OnWindowPaint();
+        impl->startDisplayLink();
+    }
+}
+
+- (void)viewWillMoveToWindow:(NSWindow *)newWindow
+{
+    if (!newWindow)
+    {
+        impl->stopDisplayLink();
     }
 }
 
@@ -316,6 +397,7 @@ public:
         NSPoint p = [theEvent locationInWindow];
         impl->windowHost->OnWindowMouseMove(Point(p.x, [self frame].size.height - p.y));
     }
+
 }
 
 - (void)rightMouseDragged:(NSEvent *)theEvent
@@ -325,6 +407,7 @@ public:
         NSPoint p = [theEvent locationInWindow];
         impl->windowHost->OnWindowMouseMove(Point(p.x, [self frame].size.height - p.y));
     }
+
 }
 
 - (void)scrollWheel:(NSEvent *)theEvent
@@ -337,6 +420,7 @@ public:
         else if ([theEvent deltaY] < 0)
             impl->windowHost->OnWindowMouseWheel(Point(p.x, [self frame].size.height - p.y), InputKey::MouseWheelDown);
     }
+
 }
 
 - (void)keyDown:(NSEvent *)theEvent
@@ -353,6 +437,7 @@ public:
             impl->windowHost->OnWindowKeyChar([characters UTF8String]);
         }
     }
+
 }
 
 - (void)keyUp:(NSEvent *)theEvent
@@ -363,6 +448,7 @@ public:
         impl->keyState[key] = false;
         impl->windowHost->OnWindowKeyUp(key);
     }
+
 }
 
 - (void)flagsChanged:(NSEvent *)theEvent
@@ -413,7 +499,7 @@ public:
         {
             impl->keyState[InputKey::RAlt] = altPressed;
             if (altPressed) impl->windowHost->OnWindowKeyDown(InputKey::RAlt);
-            else impl->windowHost->OnWindowKeyUp(InputKey::RAlt);
+            else impl->keyState[InputKey::RAlt] = false;
         }
 
         // Update Command key (mapped to LCommand)
@@ -424,6 +510,7 @@ public:
             else impl->windowHost->OnWindowKeyUp(InputKey::LCommand);
         }
     }
+
 }
 
 @end
@@ -450,7 +537,6 @@ public:
 }
 
 @end
-// Implement CocoaDisplayWindowImpl methods here
 void CocoaDisplayWindowImpl::initMetal(ZWidgetView* view)
 {
 #ifdef HAVE_METAL
@@ -458,9 +544,13 @@ void CocoaDisplayWindowImpl::initMetal(ZWidgetView* view)
     if (metalDevice)
     {
         commandQueue = [metalDevice newCommandQueue];
-        metalLayer = (CAMetalLayer*)[view layer];
+        metalLayer = [CAMetalLayer layer];
+        [view setLayer:metalLayer];
+        [view setWantsLayer:YES];
+        metalLayer.contentsScale = [NSScreen mainScreen].backingScaleFactor;
+        metalLayer.drawableSize = view.bounds.size;
         metalLayer.device = metalDevice;
-        metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;        
         metalLayer.framebufferOnly = YES;
         renderAPI = RenderAPI::Metal;
 
@@ -472,12 +562,14 @@ void CocoaDisplayWindowImpl::initMetal(ZWidgetView* view)
             renderAPI = RenderAPI::Bitmap; // Fallback
             return;
         }
+        NSLog(@"initMetal: Vertex shader library created");
         id<MTLFunction> vertexFunction = [defaultLibrary newFunctionWithName:@"vertexShader"];
         if (!vertexFunction) {
             NSLog(@"Failed to create vertex function: %@", error);
             renderAPI = RenderAPI::Bitmap; // Fallback
             return;
         }
+        NSLog(@"initMetal: Vertex function created");
 
         defaultLibrary = [metalDevice newLibraryWithSource:[NSString stringWithUTF8String:metalFragmentShader] options:nil error:&error];
         if (!defaultLibrary) {
@@ -485,12 +577,14 @@ void CocoaDisplayWindowImpl::initMetal(ZWidgetView* view)
             renderAPI = RenderAPI::Bitmap; // Fallback
             return;
         }
+        NSLog(@"initMetal: Fragment shader library created");
         id<MTLFunction> fragmentFunction = [defaultLibrary newFunctionWithName:@"fragmentShader"];
         if (!fragmentFunction) {
             NSLog(@"Failed to create fragment function: %@", error);
             renderAPI = RenderAPI::Bitmap; // Fallback
             return;
         }
+        NSLog(@"initMetal: Fragment function created");
 
         MTLRenderPipelineDescriptor* pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
         pipelineDescriptor.vertexFunction = vertexFunction;
@@ -503,6 +597,7 @@ void CocoaDisplayWindowImpl::initMetal(ZWidgetView* view)
             renderAPI = RenderAPI::Bitmap; // Fallback
             return;
         }
+        NSLog(@"initMetal: Render pipeline state created");
 
         // Create sampler state
         MTLSamplerDescriptor* samplerDescriptor = [[MTLSamplerDescriptor alloc] init];
@@ -511,6 +606,12 @@ void CocoaDisplayWindowImpl::initMetal(ZWidgetView* view)
         samplerDescriptor.sAddressMode = MTLSamplerAddressModeClampToEdge;
         samplerDescriptor.tAddressMode = MTLSamplerAddressModeClampToEdge;
         samplerState = [metalDevice newSamplerStateWithDescriptor:samplerDescriptor];
+        NSLog(@"initMetal: Sampler state created");
+    }
+    else
+    {
+        NSLog(@"initMetal: Failed to create Metal device");
+        renderAPI = RenderAPI::Bitmap;
     }
 #else
     renderAPI = RenderAPI::Bitmap; // Fallback if Metal not available
@@ -537,11 +638,95 @@ void CocoaDisplayWindowImpl::initOpenGL(ZWidgetView* view)
 #endif
 }
 
+#ifdef HAVE_METAL
+void CocoaDisplayWindowImpl::updateDrawableSize(CGSize size)
+{
+    if (metalLayer)
+    {
+        CGFloat scale = [NSScreen mainScreen].backingScaleFactor;
+        metalLayer.drawableSize = CGSizeMake(size.width * scale, size.height * scale);
+    }
+}
+#endif
+
+CVReturn CocoaDisplayWindowImpl::displayLinkOutputCallback(CVDisplayLinkRef displayLink, const CVTimeStamp* inNow, const CVTimeStamp* inOutputTime, CVOptionFlags flagsIn, CVOptionFlags* flagsOut, void* displayLinkContext)
+{
+    NSLog(@"displayLinkOutputCallback called");
+    if (renderAPI == RenderAPI::Metal)
+    {
+#ifdef HAVE_METAL
+        if (metalLayer && commandQueue && windowHost)
+        {
+            id<CAMetalDrawable> drawable = [metalLayer nextDrawable];
+            if (!drawable) return kCVReturnSuccess;
+
+            MTLRenderPassDescriptor* renderPassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
+            renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
+            renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
+            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
+            renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+
+            id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
+            id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
+
+            // If there's a texture to draw, set it and draw the quad
+            void* textureHandle = windowHost->TakeBitmapTexture();
+            if (textureHandle)
+            {
+                id<MTLTexture> texture = (__bridge_transfer id<MTLTexture>)textureHandle;
+                [renderEncoder setFragmentTexture:texture atIndex:0];
+                [renderEncoder setRenderPipelineState:renderPipelineState];
+                [renderEncoder setFragmentSamplerState:samplerState atIndex:0];
+
+                typedef struct {
+                    simd_float2 position;
+                    simd_float2 texCoord;
+                } Vertex;
+
+                Vertex quadVertices[] = {
+                    {{-1.0f, -1.0f}, {0.0f, 1.0f}}, // Bottom-left
+                    {{ 1.0f, -1.0f}, {1.0f, 1.0f}}, // Bottom-right
+                    {{-1.0f,  1.0f}, {0.0f, 0.0f}}, // Top-left
+                    {{ 1.0f, -1.0f}, {1.0f, 1.0f}}, // Bottom-right
+                    {{ 1.0f,  1.0f}, {1.0f, 0.0f}}, // Top-right
+                    {{-1.0f,  1.0f}, {0.0f, 0.0f}}  // Top-left
+                };
+                [renderEncoder setVertexBytes:quadVertices length:sizeof(quadVertices) atIndex:0];
+                [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
+            }
+
+            [renderEncoder endEncoding];
+            [commandBuffer presentDrawable:drawable];
+            [commandBuffer commit];
+        }
+#endif
+    }
+    else if (renderAPI == RenderAPI::OpenGL)
+    {
+#ifdef HAVE_OPENGL
+        if (openglContext && windowHost)
+        {
+            [openglContext makeCurrentContext];
+            windowHost->OnWindowPaint();
+            [openglContext flushBuffer];
+        }
+#endif
+    }
+    else if (renderAPI == RenderAPI::Bitmap)
+    {
+        NSLog(@"displayLinkOutputCallback: RenderAPI::Bitmap branch executed. Dispatching OnWindowPaint() to main thread.");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSLog(@"dispatch_async block executed. Calling OnWindowPaint().");
+            if (windowHost) windowHost->OnWindowPaint();
+        });
+    }
+    return kCVReturnSuccess;
+}
 
 CocoaDisplayWindow::CocoaDisplayWindow(DisplayWindowHost* windowHost, bool popupWindow, DisplayWindow* owner, RenderAPI renderAPI) : impl(std::make_unique<CocoaDisplayWindowImpl>())
 {
+    NSLog(@"CocoaDisplayWindow: Constructor entered with windowHost: %p", windowHost);
     impl->windowHost = windowHost;
-
 
     NSRect contentRect = NSMakeRect(0, 0, 800, 600); // Default size
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable;
@@ -576,7 +761,7 @@ CocoaDisplayWindow::CocoaDisplayWindow(DisplayWindowHost* windowHost, bool popup
 
         // Set initial key states
 
-        impl->keyState[InputKey::LeftMouse] = false;
+    impl->keyState[InputKey::LeftMouse] = false;
     impl->keyState[InputKey::RightMouse] = false;
     impl->keyState[InputKey::MiddleMouse] = false;
     impl->keyState[InputKey::LShift] = false;
@@ -586,6 +771,11 @@ CocoaDisplayWindow::CocoaDisplayWindow(DisplayWindowHost* windowHost, bool popup
     impl->keyState[InputKey::LAlt] = false;
     impl->keyState[InputKey::RAlt] = false;
     impl->keyState[InputKey::LCommand] = false;
+}
+
+CocoaDisplayWindow::~CocoaDisplayWindow()
+{
+    NSLog(@"CocoaDisplayWindow: Destructor entered, this = %p", this);
 }
 
 void CocoaDisplayWindow::SetWindowTitle(const std::string& text)
@@ -811,7 +1001,9 @@ int CocoaDisplayWindow::GetPixelWidth() const
     if (impl->window)
     {
         NSRect contentRect = [[impl->window contentView] frame];
-        return contentRect.size.width * [impl->window backingScaleFactor];
+        CGFloat scale = [impl->window backingScaleFactor];
+        if (scale <= 0.0) scale = 1.0;
+        return (int)std::round(contentRect.size.width * scale);
     }
     return 0;
 }
@@ -820,7 +1012,9 @@ int CocoaDisplayWindow::GetPixelHeight() const
     if (impl->window)
     {
         NSRect contentRect = [[impl->window contentView] frame];
-        return contentRect.size.height * [impl->window backingScaleFactor];
+        CGFloat scale = [impl->window backingScaleFactor];
+        if (scale <= 0.0) scale = 1.0;
+        return (int)std::round(contentRect.size.height * scale);
     }
     return 0;
 }
@@ -828,7 +1022,9 @@ double CocoaDisplayWindow::GetDpiScale() const
 {
     if (impl->window)
     {
-        return [impl->window backingScaleFactor];
+        CGFloat scale = [impl->window backingScaleFactor];
+        if (scale <= 0.0) scale = 1.0;
+        return scale;
     }
     return 1.0;
 }
@@ -862,68 +1058,11 @@ void CocoaDisplayWindow::SetCaptionTextColor(uint32_t bgra8) {}
 
 void CocoaDisplayWindow::PresentBitmap(int width, int height, const uint32_t* pixels)
 {
-    if (impl->renderAPI == RenderAPI::Bitmap)
-    {
-        if (impl->bitmapRep)
-        {
-            impl->bitmapRep = nil;
-        }
-
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        CGContextRef context = CGBitmapContextCreate(
-            (void*)pixels, width, height, 8, width * 4, colorSpace,
-            kCGImageAlphaPremultipliedLast | (CGBitmapInfo)kCGBitmapByteOrder32Big);
-
-        if (context)
-        {
-            CGImageRef cgImage = CGBitmapContextCreateImage(context);
-            if (cgImage)
-            {
-                impl->bitmapRep = [[NSBitmapImageRep alloc] initWithCGImage:cgImage];
-                CGImageRelease(cgImage);
-            }
-            CGContextRelease(context);
-        }
-        CGColorSpaceRelease(colorSpace);
-
-        if (impl->window)
-        {
-            [[impl->window contentView] setNeedsDisplay:YES];
-        }
-    }
-    else if (impl->renderAPI == RenderAPI::OpenGL)
-    {
-#ifdef HAVE_OPENGL
-        if (impl->openglContext)
-        {
-            [impl->openglContext makeCurrentContext];
-            glViewport(0, 0, width, height);
-            glRasterPos2i(-1, -1);
-            glDrawPixels(width, height, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
-            [impl->openglContext flushBuffer];
-        }
-#endif
-    }
-    else if (impl->renderAPI == RenderAPI::Metal)
+    if (impl->renderAPI == RenderAPI::Metal)
     {
 #ifdef HAVE_METAL
-        if (impl->metalLayer && impl->commandQueue)
+        if (impl->metalDevice && impl->metalLayer)
         {
-            id<CAMetalDrawable> drawable = [impl->metalLayer nextDrawable];
-            if (!drawable)
-                return;
-
-            MTLRenderPassDescriptor* renderPassDescriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-            renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
-            renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
-            renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
-            renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
-
-            id<MTLCommandBuffer> commandBuffer = [impl->commandQueue commandBuffer];
-            id<MTLRenderCommandEncoder> renderEncoder = [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
-
-            // Metal rendering will be implemented here
-
             // Create texture from pixels
             MTLTextureDescriptor *textureDescriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
                                                                                                          width:width
@@ -937,45 +1076,58 @@ void CocoaDisplayWindow::PresentBitmap(int width, int height, const uint32_t* pi
                         withBytes:pixels
                       bytesPerRow:width * 4]; // 4 bytes per pixel (BGRA8Unorm)
 
-            // Set the texture in the fragment shader
-            [renderEncoder setFragmentTexture:texture atIndex:0];
-
-            // Set render pipeline state
-            [renderEncoder setRenderPipelineState:impl->renderPipelineState];
-
-            // Set sampler state
-            [renderEncoder setFragmentSamplerState:impl->samplerState atIndex:0];
-
-            // Define vertices for a quad that covers the entire screen
-            // The texture coordinates are (0,0) to (1,1)
-            typedef struct {
-                simd_float2 position;
-                simd_float2 texCoord;
-            } Vertex;
-
-            Vertex quadVertices[] = {
-                // Triangle 1
-                {{-1.0f, -1.0f}, {0.0f, 1.0f}}, // Bottom-left
-                {{ 1.0f, -1.0f}, {1.0f, 1.0f}}, // Bottom-right
-                {{-1.0f,  1.0f}, {0.0f, 0.0f}}, // Top-left
-
-                // Triangle 2
-                {{ 1.0f, -1.0f}, {1.0f, 1.0f}}, // Bottom-right
-                {{ 1.0f,  1.0f}, {1.0f, 0.0f}}, // Top-right
-                {{-1.0f,  1.0f}, {0.0f, 0.0f}}  // Top-left
-            };
-
-            // Set vertex buffer
-            [renderEncoder setVertexBytes:quadVertices length:sizeof(quadVertices) atIndex:0];
-
-            // Draw the quad
-            [renderEncoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
-
-            [renderEncoder endEncoding];
-            [commandBuffer presentDrawable:drawable];
-            [commandBuffer commit];
+            // Store the texture in the windowHost for the display link to use
+            impl->windowHost->SetBitmapTexture((void*)CFBridgingRetain(texture));
         }
 #endif
+    }
+    else if (impl->renderAPI == RenderAPI::OpenGL)
+    {
+#ifdef HAVE_OPENGL
+        if (impl->openglContext)
+        {
+            [impl->openglContext makeCurrentContext];
+            glViewport(0, 0, width, height);
+            glRasterPos2i(-1, -1);
+            glDrawPixels(width, height, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, pixels);
+            // No flushBuffer here, it will be done by the display link callback
+        }
+#endif
+    }
+    else if (impl->renderAPI == RenderAPI::Bitmap)
+    {
+        NSLog(@"PresentBitmap: RenderAPI::Bitmap path executed.");
+        if (impl->cgImage) CGImageRelease(impl->cgImage);
+        impl->cgImage = nullptr;
+
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+        CGContextRef context = CGBitmapContextCreate(
+            (void*)pixels, width, height, 8, width * 4, colorSpace,
+            kCGImageAlphaPremultipliedLast | (CGBitmapInfo)kCGBitmapByteOrder32Big);
+
+        if (context)
+        {
+            impl->cgImage = CGBitmapContextCreateImage(context);
+            if (impl->cgImage)
+            {
+                NSLog(@"PresentBitmap: CGImageRef created successfully.");
+            }
+            else
+            {
+                NSLog(@"PresentBitmap: Failed to create CGImageRef.");
+            }
+            CGContextRelease(context);
+        }
+        else
+        {
+            NSLog(@"PresentBitmap: Failed to create CGBitmapContext.");
+        }
+        CGColorSpaceRelease(colorSpace);
+
+        if (impl->window)
+        {
+            [[impl->window contentView] setNeedsDisplay:YES];
+        }
     }
 }
 
@@ -1055,5 +1207,3 @@ VkSurfaceKHR CocoaDisplayWindow::CreateVulkanSurface(VkInstance instance)
 #endif
     return surface;
 }
-
-

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <iostream>
 #include <string>
 #include <functional>
 #include <cstdint>
@@ -297,6 +298,9 @@ public:
 	virtual void OnWindowActivated() = 0;
 	virtual void OnWindowDeactivated() = 0;
 	virtual void OnWindowDpiScaleChanged() = 0;
+	virtual void SetBitmapTexture(void* texture) = 0;
+	virtual void* GetBitmapTexture() = 0;
+	virtual void* TakeBitmapTexture() = 0;
 };
 
 class DisplayWindow
@@ -313,7 +317,7 @@ public:
 
 	static Size GetScreenSize();
 
-	virtual ~DisplayWindow() = default;
+	virtual ~DisplayWindow() { std::cout << "DisplayWindow destructor called, this = " << this << std::endl; }
 
 	virtual void SetWindowTitle(const std::string& text) = 0;
 	virtual void SetWindowIcon(const std::vector<std::shared_ptr<Image>>& images) = 0;

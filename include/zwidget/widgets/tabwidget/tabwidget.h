@@ -110,7 +110,7 @@ private:
 
 	ImageBox* Icon = nullptr;
 	TextLabel* Label = nullptr;
-	bool hot = false;
+	
 };
 
 class TabWidgetStack : public Widget

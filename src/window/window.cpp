@@ -6,10 +6,13 @@
 #include "window/sdl2nativehandle.h"
 #include "core/widget.h"
 #include <stdexcept>
+#include <iostream>
 
 std::unique_ptr<DisplayWindow> DisplayWindow::Create(DisplayWindowHost* windowHost, bool popupWindow, DisplayWindow* owner, RenderAPI renderAPI)
 {
-	return DisplayBackend::Get()->Create(windowHost, popupWindow, owner, renderAPI);
+	std::unique_ptr<DisplayWindow> createdWindow = DisplayBackend::Get()->Create(windowHost, popupWindow, owner, renderAPI);
+	std::cout << "DisplayWindow::Create: createdWindow.get() = " << createdWindow.get() << std::endl;
+	return createdWindow;
 }
 
 void DisplayWindow::ProcessEvents()
@@ -38,6 +41,8 @@ void DisplayWindow::StopTimer(void* timerID)
 }
 
 Size DisplayWindow::GetScreenSize()
+
+
 {
 	return DisplayBackend::Get()->GetScreenSize();
 }
@@ -106,6 +111,7 @@ std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateBackend()
 	if (!backend)
 	{
 		backend = TryCreateWin32();
+		if (!backend) backend = TryCreateCocoa();
 		if (!backend) backend = TryCreateWayland();
 		if (!backend) backend = TryCreateX11();
 		if (!backend) backend = TryCreateSDL2();
@@ -194,15 +200,6 @@ std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateWayland()
 #else
 
 std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateWayland()
-{
-	return nullptr;
-}
-
-#endif
-
-#ifndef __APPLE__
-
-std::unique_ptr<DisplayBackend> TryCreateCocoa()
 {
 	return nullptr;
 }

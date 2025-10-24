@@ -1,3 +1,4 @@
+#include <iostream>
 #include "core/widget.h"
 #include "core/timer.h"
 #include "core/colorf.h"
@@ -6,34 +7,55 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
+#if defined(__APPLE__)
+extern "C" {
+	typedef const void* CFTypeRef;
+	void CFRelease(CFTypeRef cf);
+}
+#endif
 
 Widget::Widget(Widget* parent, WidgetType type, RenderAPI renderAPI) : Type(type)
 {
+	std::cout << "Widget: Constructor entered, this = " << this << ", type=" << (int)type << ", renderAPI=" << (int)renderAPI << std::endl;
 	if (type != WidgetType::Child)
 	{
+		std::cout << "Widget: Creating DisplayWindow" << std::endl;
 		Widget* owner = parent ? parent->Window() : nullptr;
 		DispWindow = DisplayWindow::Create(this, type == WidgetType::Popup, owner ? owner->DispWindow.get() : nullptr, renderAPI);
-		if (renderAPI == RenderAPI::Unspecified || renderAPI == RenderAPI::Bitmap)
+		std::cout << "Widget: DisplayWindow created, this = " << this << ", DispWindow.get() = " << DispWindow.get() << std::endl;
+		if (DispWindow)
 		{
+			std::cout << "Widget: Creating Canvas" << std::endl;
 			DispCanvas = Canvas::create();
+			std::cout << "Widget: DispCanvas created, DispCanvas = " << DispCanvas.get() << std::endl;
 			DispCanvas->attach(DispWindow.get());
+			std::cout << "Widget: Canvas created and attached" << std::endl;
 		}
 		SetStyleState("root");
 
-		SetWindowBackground(GetStyleColor("window-background"));
-		if (GetStyleColor("window-border").a > 0.0f)
-			SetWindowBorderColor(GetStyleColor("window-border"));
-		if (GetStyleColor("window-caption-color").a > 0.0f)
-			SetWindowCaptionColor(GetStyleColor("window-caption-color"));
-		if (GetStyleColor("window-caption-text-color").a > 0.0f)
-			SetWindowCaptionTextColor(GetStyleColor("window-caption-text-color"));
+		// SetWindowBackground(GetStyleColor("window-background"));
+		// if (GetStyleColor("window-border").a > 0.0f)
+		//	SetWindowBorderColor(GetStyleColor("window-border"));
+		// if (GetStyleColor("window-caption-color").a > 0.0f)
+		//	SetWindowCaptionColor(GetStyleColor("window-caption-color"));
+		// if (GetStyleColor("window-caption-text-color").a > 0.0f)
+		//	SetWindowCaptionTextColor(GetStyleColor("window-caption-text-color"));
 	}
 
 	SetParent(parent);
+	std::cout << "Widget: Constructor exited, this = " << this << ", DispWindow.get() = " << DispWindow.get() << std::endl;
 }
 
 Widget::~Widget()
 {
+	std::cout << "Widget: Destructor entered, this = " << this << std::endl;
+	if (m_BitmapTexture)
+	{
+#if defined(__APPLE__)
+		CFRelease(static_cast<CFTypeRef>(m_BitmapTexture));
+#endif
+		m_BitmapTexture = nullptr;
+	}
 	for (auto subscription: Subscriptions)
 		subscription->Subscribers.erase(this);
 
@@ -43,6 +65,11 @@ Widget::~Widget()
 	if (DispCanvas)
 		DispCanvas->detach();
 
+	if (DispWindow)
+	{
+		std::cout << "Widget: DispWindow is not null in destructor, this = " << this << ", DispWindow.get() = " << DispWindow.get() << std::endl;
+	}
+
 	while (LastChildObj)
 		delete LastChildObj;
 
@@ -50,6 +77,7 @@ Widget::~Widget()
 		delete FirstTimerObj;
 
 	DetachFromParent();
+	std::cout << "Widget: Destructor exited, this = " << this << std::endl;
 }
 
 void Widget::Subscribe(Widget* subscriber)
@@ -397,17 +425,24 @@ void Widget::Update()
 
 void Widget::Repaint()
 {
+	std::cout << "Widget::Repaint() called" << std::endl;
 	Widget* w = Window();
-	if (w->DispCanvas)
-	{
-		w->DispCanvas->begin(w->WindowBackground);
-		w->Paint(w->DispCanvas.get());
-		w->DispCanvas->end();
+	if (!w || !w->DispWindow)
+		return;
+
+	if (!w->DispCanvas) {
+		w->DispCanvas = Canvas::create();
+		w->DispCanvas->attach(w->DispWindow.get());
 	}
+
+	w->DispCanvas->begin(w->WindowBackground);
+	w->Paint(w->DispCanvas.get());
+	w->DispCanvas->end();
 }
 
 void Widget::Paint(Canvas* canvas)
 {
+	std::cout << "Widget::Paint(), this = " << this << ", type = " << (int)Type << ", class = " << StyleClass << std::endl;
 	Point oldOrigin = canvas->getOrigin();
 	canvas->pushClip(FrameGeometry);
 	canvas->setOrigin(oldOrigin + FrameGeometry.topLeft());
@@ -613,10 +648,29 @@ void Widget::SetClipboardText(const std::string& text)
 		w->DispWindow->SetClipboardText(text);
 }
 
+void Widget::SetBitmapTexture(void* texture)
+{
+#if defined(__APPLE__)
+	if (m_BitmapTexture && m_BitmapTexture != texture)
+	{
+		CFRelease(static_cast<CFTypeRef>(m_BitmapTexture));
+	}
+#endif
+	m_BitmapTexture = texture;
+}
+
+void* Widget::TakeBitmapTexture()
+{
+	void* texture = m_BitmapTexture;
+	m_BitmapTexture = nullptr;
+	return texture;
+}
+
 Widget* Widget::Window() const
 {
 	for (const Widget* w = this; w != nullptr; w = w->Parent())
 	{
+		std::cout << "Widget::Window(), w = " << w << ", w->DispWindow = " << w->DispWindow << std::endl;
 		if (w->DispWindow)
 			return const_cast<Widget*>(w);
 	}
@@ -730,6 +784,7 @@ Point Widget::MapToGlobal(const Point& pos) const
 
 void Widget::OnWindowPaint()
 {
+	std::cout << "Widget::OnWindowPaint() called (from widget.cpp)" << std::endl;
 	Repaint();
 }
 
