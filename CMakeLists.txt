@@ -204,6 +204,13 @@ set(ZWIDGET_WAYLAND_SOURCES
 	src/window/wayland/wl_xdg_toplevel_icon.hpp
 )
 
+set(ZWIDGET_HAIKU_SOURCES
+	src/window/haiku/haiku_display_backend.cpp
+	src/window/haiku/haiku_display_backend.h
+	src/window/haiku/haiku_display_window.cpp
+	src/window/haiku/haiku_display_window.h
+)
+
 source_group("src" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/.+")
 source_group("src\\core" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/core/.+")
 source_group("src\\core\\picopng" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/core/picopng/.+")
@@ -230,6 +237,7 @@ source_group("src\\window\\sdl2" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}
 source_group("src\\window\\sdl3" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/window/sdl3/.+")
 source_group("src\\window\\x11" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/window/x11/.+")
 source_group("src\\window\\wayland" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/window/wayland/.+")
+source_group("src\\window\\haiku" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/window/haiku/.+")
 source_group("src\\window\\dbus" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/window/dbus/.+")
 source_group("src\\systemdialogs" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/src/systemdialogs/.+")
 source_group("include" REGULAR_EXPRESSION "${CMAKE_CURRENT_SOURCE_DIR}/include/zwidget/.+")
@@ -304,9 +312,9 @@ elseif(APPLE)
 		message(FATAL_ERROR "UniformTypeIdentifiers framework not found")
 	endif()
 elseif(HAIKU)
-	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES} ${ZWIDGET_UNIX_SOURCES})
-	set(ZWIDGET_LIBS ${CMAKE_DL_LIBS})
-	set(ZWIDGET_DEFINES -DUNIX -D_UNIX)
+	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES} ${ZWIDGET_UNIX_SOURCES} ${ZWIDGET_HAIKU_SOURCES})
+	set(ZWIDGET_LIBS ${CMAKE_DL_LIBS} -lbe)
+	set(ZWIDGET_DEFINES -DUNIX -D_UNIX -DUSE_HAIKU)
 	set(ZWIDGET_LINK_OPTIONS -pthread)
 else()
 	set(ZWIDGET_SOURCES ${ZWIDGET_SOURCES} ${ZWIDGET_UNIX_SOURCES})

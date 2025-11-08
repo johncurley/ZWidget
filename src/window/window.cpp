@@ -97,6 +97,10 @@ std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateBackend()
 		{
 			backend = TryCreateX11();
 		}
+		else if (backendSelectionStr == "Haiku")
+		{
+			backend = TryCreateHaiku();
+		}
 		else if (backendSelectionStr == "SDL3")
 		{
 			backend = TryCreateSDL3();
@@ -110,6 +114,7 @@ std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateBackend()
 	if (!backend)
 	{
 		backend = TryCreateWin32();
+		if (!backend) backend = TryCreateHaiku();
 		if (!backend) backend = TryCreateWayland();
 		if (!backend) backend = TryCreateX11();
 		if (!backend) backend = TryCreateSDL3();
@@ -217,6 +222,31 @@ std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateWayland()
 #else
 
 std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateWayland()
+{
+	return nullptr;
+}
+
+#endif
+
+#ifdef USE_HAIKU
+
+#include "haiku/haiku_display_backend.h"
+
+std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateHaiku()
+{
+	try
+	{
+		return std::make_unique<HaikuDisplayBackend>();
+	}
+	catch (...)
+	{
+		return nullptr;
+	}
+}
+
+#else
+
+std::unique_ptr<DisplayBackend> DisplayBackend::TryCreateHaiku()
 {
 	return nullptr;
 }
