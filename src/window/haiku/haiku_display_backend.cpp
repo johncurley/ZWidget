@@ -2,11 +2,35 @@
 #include "haiku_display_window.h"
 #include <stdexcept>
 
+#ifdef __HAIKU__
+#include <interface/Screen.h>
+#include <app/Application.h>
+#endif
+
 HaikuDisplayBackend::HaikuDisplayBackend()
 {
+#ifdef __HAIKU__
 	// Initialize HaikuOS backend
-	// For now, this is a stub implementation
+	// Create BApplication if it doesn't exist
+	if (!be_app)
+	{
+		// Note: BApplication needs a signature
+		// In a real application, this should be done by the host application
+		// new BApplication("application/x-vnd.ZWidget");
+	}
+
 	UIScale = 1.0;
+
+	// Get DPI information from the screen
+	BScreen screen;
+	if (screen.IsValid())
+	{
+		// Haiku uses a default 96 DPI, but we could query the actual screen DPI
+		// For now, we'll use 1.0 scale
+	}
+#else
+	UIScale = 1.0;
+#endif
 }
 
 HaikuDisplayBackend::~HaikuDisplayBackend()
@@ -35,8 +59,15 @@ void HaikuDisplayBackend::ExitLoop()
 
 Size HaikuDisplayBackend::GetScreenSize()
 {
-	// Stub: return a default screen size
-	// In a real implementation, this would query the Haiku screen dimensions
+#ifdef __HAIKU__
+	BScreen screen;
+	if (screen.IsValid())
+	{
+		BRect frame = screen.Frame();
+		return Size(frame.Width() + 1, frame.Height() + 1);
+	}
+#endif
+	// Fallback: return a default screen size
 	return Size(1920, 1080);
 }
 

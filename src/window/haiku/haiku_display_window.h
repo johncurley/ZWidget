@@ -4,6 +4,17 @@
 #include <zwidget/window/window.h>
 #include <zwidget/window/haikunativehandle.h>
 
+#ifdef __HAIKU__
+#include <Application.h>
+#include <Window.h>
+#include <View.h>
+#include <Screen.h>
+#include <Bitmap.h>
+#include <Clipboard.h>
+#include <MessageRunner.h>
+#include <Cursor.h>
+#endif
+
 class HaikuDisplayWindow : public DisplayWindow
 {
 public:
