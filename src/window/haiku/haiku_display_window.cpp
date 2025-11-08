@@ -13,27 +13,6 @@
 #include <interface/Bitmap.h>
 #include <support/Beep.h>
 #include <os/kernel/OS.h>
-
-// Vulkan types needed for surface creation
-#ifndef VK_SUCCESS
-#define VK_SUCCESS 0
-#endif
-
-#ifndef VK_NULL_HANDLE
-#define VK_NULL_HANDLE nullptr
-#endif
-
-#ifndef VKAPI_PTR
-#define VKAPI_PTR
-#endif
-
-typedef int VkResult;
-typedef int VkStructureType;
-
-// Forward declarations of our custom BWindow and BView classes
-class ZWidgetWindow;
-class ZWidgetView;
-
 #endif
 
 bool HaikuDisplayWindow::ExitRunLoop = false;
@@ -73,8 +52,23 @@ public:
 	{
 		if (DisplayWindow && DisplayWindow->WindowHost)
 		{
-			// Handle mouse button press
-			DisplayWindow->WindowHost->OnWindowMouseDown(Point(where.x, where.y), InputKey::LeftMouse);
+			// Determine which button was pressed
+			InputKey button = InputKey::LeftMouse;
+			BMessage* msg = Window()->CurrentMessage();
+			if (msg)
+			{
+				int32 buttons = 0;
+				if (msg->FindInt32("buttons", &buttons) == B_OK)
+				{
+					if (buttons & B_PRIMARY_MOUSE_BUTTON)
+						button = InputKey::LeftMouse;
+					else if (buttons & B_SECONDARY_MOUSE_BUTTON)
+						button = InputKey::RightMouse;
+					else if (buttons & B_TERTIARY_MOUSE_BUTTON)
+						button = InputKey::MiddleMouse;
+				}
+			}
+			DisplayWindow->WindowHost->OnWindowMouseDown(Point(where.x, where.y), button);
 		}
 	}
 
@@ -82,7 +76,30 @@ public:
 	{
 		if (DisplayWindow && DisplayWindow->WindowHost)
 		{
-			DisplayWindow->WindowHost->OnWindowMouseUp(Point(where.x, where.y), InputKey::LeftMouse);
+			// Determine which button was released
+			InputKey button = InputKey::LeftMouse;
+			BMessage* msg = Window()->CurrentMessage();
+			if (msg)
+			{
+				int32 buttons = 0;
+				if (msg->FindInt32("buttons", &buttons) == B_OK)
+				{
+					// Note: buttons field contains buttons STILL pressed after this release
+					// We need to check which buttons changed
+					int32 clicks = 0;
+					msg->FindInt32("clicks", &clicks);
+
+					// For now, assume the button that's NOT in buttons anymore
+					// This is a simplification - proper implementation would track button state
+					if (!(buttons & B_PRIMARY_MOUSE_BUTTON))
+						button = InputKey::LeftMouse;
+					else if (!(buttons & B_SECONDARY_MOUSE_BUTTON))
+						button = InputKey::RightMouse;
+					else if (!(buttons & B_TERTIARY_MOUSE_BUTTON))
+						button = InputKey::MiddleMouse;
+				}
+			}
+			DisplayWindow->WindowHost->OnWindowMouseUp(Point(where.x, where.y), button);
 		}
 	}
 
@@ -98,11 +115,108 @@ public:
 	{
 		if (DisplayWindow && DisplayWindow->WindowHost)
 		{
-			// Basic key handling - would need proper key mapping
+			// Get key code from message
+			BMessage* msg = Window()->CurrentMessage();
+			if (msg)
+			{
+				int32 rawChar = 0;
+				int32 key = 0;
+				if (msg->FindInt32("raw_char", &rawChar) == B_OK)
+				{
+					// Map Haiku key codes to InputKey
+					// This is a simplified mapping - full implementation would need complete key table
+					InputKey inputKey = MapHaikuKeyToInputKey(rawChar);
+					if (inputKey != InputKey::None)
+					{
+						DisplayWindow->WindowHost->OnWindowKeyDown(inputKey);
+					}
+				}
+			}
+
+			// Also send character input for text
 			if (numBytes > 0)
 			{
 				DisplayWindow->WindowHost->OnWindowKeyChar(std::string(bytes, numBytes));
 			}
+		}
+	}
+
+	virtual void KeyUp(const char* bytes, int32 numBytes) override
+	{
+		if (DisplayWindow && DisplayWindow->WindowHost)
+		{
+			BMessage* msg = Window()->CurrentMessage();
+			if (msg)
+			{
+				int32 rawChar = 0;
+				if (msg->FindInt32("raw_char", &rawChar) == B_OK)
+				{
+					InputKey inputKey = MapHaikuKeyToInputKey(rawChar);
+					if (inputKey != InputKey::None)
+					{
+						DisplayWindow->WindowHost->OnWindowKeyUp(inputKey);
+					}
+				}
+			}
+		}
+	}
+
+	virtual void MouseWheel(BPoint where, float deltaX, float deltaY) override
+	{
+		if (DisplayWindow && DisplayWindow->WindowHost)
+		{
+			// deltaY > 0 means scroll down, < 0 means scroll up
+			if (deltaY > 0)
+			{
+				DisplayWindow->WindowHost->OnWindowMouseWheel(Point(where.x, where.y), InputKey::MouseWheelDown);
+			}
+			else if (deltaY < 0)
+			{
+				DisplayWindow->WindowHost->OnWindowMouseWheel(Point(where.x, where.y), InputKey::MouseWheelUp);
+			}
+		}
+	}
+
+	static InputKey MapHaikuKeyToInputKey(int32 rawChar)
+	{
+		// Map Haiku B_* key constants to InputKey enum
+		// This is a simplified mapping - add more keys as needed
+		switch (rawChar)
+		{
+			case B_ESCAPE: return InputKey::Escape;
+			case B_RETURN: return InputKey::Return;
+			case B_SPACE: return InputKey::Space;
+			case B_BACKSPACE: return InputKey::Back;
+			case B_TAB: return InputKey::Tab;
+			case B_LEFT_ARROW: return InputKey::Left;
+			case B_RIGHT_ARROW: return InputKey::Right;
+			case B_UP_ARROW: return InputKey::Up;
+			case B_DOWN_ARROW: return InputKey::Down;
+			case B_INSERT: return InputKey::Insert;
+			case B_DELETE: return InputKey::Delete;
+			case B_HOME: return InputKey::Home;
+			case B_END: return InputKey::End;
+			case B_PAGE_UP: return InputKey::Prior;
+			case B_PAGE_DOWN: return InputKey::Next;
+			case B_F1_KEY: return InputKey::F1;
+			case B_F2_KEY: return InputKey::F2;
+			case B_F3_KEY: return InputKey::F3;
+			case B_F4_KEY: return InputKey::F4;
+			case B_F5_KEY: return InputKey::F5;
+			case B_F6_KEY: return InputKey::F6;
+			case B_F7_KEY: return InputKey::F7;
+			case B_F8_KEY: return InputKey::F8;
+			case B_F9_KEY: return InputKey::F9;
+			case B_F10_KEY: return InputKey::F10;
+			case B_F11_KEY: return InputKey::F11;
+			case B_F12_KEY: return InputKey::F12;
+			default:
+				// For alphanumeric keys, check ASCII range
+				if (rawChar >= 'A' && rawChar <= 'Z')
+					return static_cast<InputKey>(static_cast<uint32_t>(InputKey::A) + (rawChar - 'A'));
+				if (rawChar >= '0' && rawChar <= '9')
+					return static_cast<InputKey>(static_cast<uint32_t>(InputKey::_0) + (rawChar - '0'));
+				return InputKey::None;
 		}
 	}
 
@@ -546,6 +660,27 @@ std::vector<std::string> HaikuDisplayWindow::GetVulkanInstanceExtensions()
 #endif
 }
 
+// This is to avoid needing all the Vulkan headers and the volk binding library just for this:
+#ifndef VK_VERSION_1_0
+
+#define VKAPI_CALL
+#define VKAPI_PTR VKAPI_CALL
+
+typedef uint32_t VkFlags;
+typedef enum VkStructureType { VK_STRUCTURE_TYPE_HAIKU_SURFACE_CREATE_INFO_EXT = 1000000000, VK_STRUCTURE_TYPE_MAX_ENUM = 0x7FFFFFFF } VkStructureType;
+typedef enum VkResult { VK_SUCCESS = 0, VK_RESULT_MAX_ENUM = 0x7FFFFFFF } VkResult;
+typedef struct VkAllocationCallbacks VkAllocationCallbacks;
+
+typedef void (VKAPI_PTR* PFN_vkVoidFunction)(void);
+typedef PFN_vkVoidFunction(VKAPI_PTR* PFN_vkGetInstanceProcAddr)(VkInstance instance, const char* pName);
+
+#ifndef VK_EXT_haiku_surface
+
+typedef VkFlags VkHaikuSurfaceCreateFlagsEXT;
+
+#endif
+#endif
+
 #ifdef __HAIKU__
 
 class ZWidgetHaikuVulkanLoader
@@ -579,18 +714,23 @@ public:
 	void* module = nullptr;
 };
 
-// Define the Haiku surface creation info structure
-// This would typically be defined in vulkan_haiku.h when/if the extension exists
+#endif
+
+// Define the Haiku surface creation info structure (outside __HAIKU__ guard so stub can compile)
+#ifndef VK_EXT_haiku_surface
+
 typedef struct VkHaikuSurfaceCreateInfoEXT {
 	VkStructureType sType;
 	const void* pNext;
-	uint32_t flags;
+	VkHaikuSurfaceCreateFlagsEXT flags;
+#ifdef __HAIKU__
 	BWindow* window;
+#else
+	void* window;
+#endif
 } VkHaikuSurfaceCreateInfoEXT;
 
-#define VK_STRUCTURE_TYPE_HAIKU_SURFACE_CREATE_INFO_EXT ((VkStructureType)1000000000)
-
-typedef VkResult (VKAPI_PTR *PFN_vkCreateHaikuSurfaceEXT)(VkInstance instance, const VkHaikuSurfaceCreateInfoEXT* pCreateInfo, const void* pAllocator, VkSurfaceKHR* pSurface);
+typedef VkResult (VKAPI_PTR *PFN_vkCreateHaikuSurfaceEXT)(VkInstance instance, const VkHaikuSurfaceCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkSurfaceKHR* pSurface);
 
 #endif
 
