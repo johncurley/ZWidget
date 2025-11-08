@@ -73,6 +73,7 @@ public:
 
 	static void* StartTimer(int timeoutMilliseconds, std::function<void()> onTimer);
 	static void StopTimer(void* timerID);
+	static void CreateApplication();
 
 	DisplayWindowHost* WindowHost = nullptr;
 	HaikuNativeHandle Handle;
@@ -81,6 +82,7 @@ public:
 	bool CursorLocked = false;
 	bool isFullscreen = false;
 	int32 CurrentModifiers = 0;  // Track current modifier key state
+	Point LastMousePos;  // Track last mouse position for raw delta calculation
 
 	Rect WindowFrame;
 	Size ClientSize;

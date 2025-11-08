@@ -11,14 +11,10 @@ HaikuDisplayBackend::HaikuDisplayBackend()
 {
 #ifdef __HAIKU__
 	// Initialize HaikuOS backend
-	// Create BApplication if it doesn't exist
+	// Create custom BApplication if it doesn't exist
 	// This is required for BWindow to work properly
-	if (!be_app)
-	{
-		// Create BApplication with a proper signature
-		// Note: This creates be_app global which BWindow/BView need
-		new BApplication("application/x-vnd.ZWidget");
-	}
+	// We use a custom BApplication to handle timer messages
+	HaikuDisplayWindow::CreateApplication();
 
 	UIScale = 1.0;
 

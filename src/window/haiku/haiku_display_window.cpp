@@ -9,10 +9,21 @@
 #include <app/Application.h>
 #include <app/Messenger.h>
 #include <app/Message.h>
+#include <app/MessageRunner.h>
 #include <interface/Screen.h>
 #include <interface/Bitmap.h>
 #include <support/Beep.h>
 #include <os/kernel/OS.h>
+
+// Timer message constant
+const uint32 ZWIDGET_TIMER_MSG = 'zwtm';
+
+// Timer data structure
+struct TimerData
+{
+	BMessageRunner* runner = nullptr;
+	std::function<void()> callback;
+};
 #endif
 
 bool HaikuDisplayWindow::ExitRunLoop = false;
@@ -20,6 +31,43 @@ std::unordered_map<void*, std::function<void()>> HaikuDisplayWindow::Timers;
 unsigned long HaikuDisplayWindow::TimerIDs = 0;
 
 #ifdef __HAIKU__
+// Map to store BMessageRunner objects for active timers
+static std::unordered_map<void*, BMessageRunner*> TimerRunners;
+#endif
+
+#ifdef __HAIKU__
+
+// Custom BApplication class to handle timer messages
+class ZWidgetApplication : public BApplication
+{
+public:
+	ZWidgetApplication(const char* signature)
+		: BApplication(signature)
+	{
+	}
+
+	virtual void MessageReceived(BMessage* message) override
+	{
+		if (message->what == ZWIDGET_TIMER_MSG)
+		{
+			// Extract timer ID from message
+			void* timerID = nullptr;
+			if (message->FindPointer("timer_id", &timerID) == B_OK)
+			{
+				// Find and execute the timer callback
+				auto it = HaikuDisplayWindow::Timers.find(timerID);
+				if (it != HaikuDisplayWindow::Timers.end())
+				{
+					it->second();  // Execute callback
+				}
+			}
+		}
+		else
+		{
+			BApplication::MessageReceived(message);
+		}
+	}
+};
 
 // Custom BView class to handle rendering and events
 class ZWidgetView : public BView
@@ -62,6 +110,7 @@ public:
 		{
 			// Determine which button was pressed
 			InputKey button = InputKey::LeftMouse;
+			int32 clicks = 1;
 			BMessage* msg = Window()->CurrentMessage();
 			if (msg)
 			{
@@ -75,8 +124,20 @@ public:
 					else if (buttons & B_TERTIARY_MOUSE_BUTTON)
 						button = InputKey::MiddleMouse;
 				}
+
+				// Get click count for double-click detection
+				msg->FindInt32("clicks", &clicks);
 			}
-			DisplayWindow->WindowHost->OnWindowMouseDown(Point(where.x, where.y), button);
+
+			// Fire double-click event if clicks >= 2
+			if (clicks >= 2)
+			{
+				DisplayWindow->WindowHost->OnWindowMouseDoubleclick(Point(where.x, where.y), button);
+			}
+			else
+			{
+				DisplayWindow->WindowHost->OnWindowMouseDown(Point(where.x, where.y), button);
+			}
 		}
 	}
 
@@ -115,7 +176,21 @@ public:
 	{
 		if (DisplayWindow && DisplayWindow->WindowHost)
 		{
-			DisplayWindow->WindowHost->OnWindowMouseMove(Point(where.x, where.y));
+			Point currentPos(where.x, where.y);
+
+			// Send raw mouse delta if cursor is locked
+			if (DisplayWindow->CursorLocked)
+			{
+				int dx = static_cast<int>(currentPos.x - DisplayWindow->LastMousePos.x);
+				int dy = static_cast<int>(currentPos.y - DisplayWindow->LastMousePos.y);
+				if (dx != 0 || dy != 0)
+				{
+					DisplayWindow->WindowHost->OnWindowRawMouseMove(dx, dy);
+				}
+			}
+
+			DisplayWindow->LastMousePos = currentPos;
+			DisplayWindow->WindowHost->OnWindowMouseMove(currentPos);
 		}
 	}
 
@@ -135,6 +210,13 @@ public:
 				{
 					// Store modifiers in DisplayWindow for GetKeyState
 					DisplayWindow->CurrentModifiers = modifiers;
+
+					// Send raw key event
+					RawKeycode rawKeycode = MapHaikuKeyToRawKeycode(rawChar);
+					if (rawKeycode != RawKeycode::None)
+					{
+						DisplayWindow->WindowHost->OnWindowRawKey(rawKeycode, true);
+					}
 
 					// Map Haiku key codes to InputKey
 					InputKey inputKey = MapHaikuKeyToInputKey(rawChar);
@@ -171,6 +253,13 @@ public:
 				{
 					// Update stored modifiers
 					DisplayWindow->CurrentModifiers = modifiers;
+
+					// Send raw key event
+					RawKeycode rawKeycode = MapHaikuKeyToRawKeycode(rawChar);
+					if (rawKeycode != RawKeycode::None)
+					{
+						DisplayWindow->WindowHost->OnWindowRawKey(rawKeycode, false);
+					}
 
 					InputKey inputKey = MapHaikuKeyToInputKey(rawChar);
 					if (inputKey != InputKey::None)
@@ -271,6 +360,79 @@ public:
 		}
 	}
 
+	static RawKeycode MapHaikuKeyToRawKeycode(int32 rawChar)
+	{
+		// Map Haiku key codes to RawKeycode (scan codes)
+		// This is an approximate mapping as Haiku doesn't use scan codes directly
+		switch (rawChar)
+		{
+			case B_ESCAPE: return RawKeycode::Escape;
+			case '1': return RawKeycode::_1;
+			case '2': return RawKeycode::_2;
+			case '3': return RawKeycode::_3;
+			case '4': return RawKeycode::_4;
+			case '5': return RawKeycode::_5;
+			case '6': return RawKeycode::_6;
+			case '7': return RawKeycode::_7;
+			case '8': return RawKeycode::_8;
+			case '9': return RawKeycode::_9;
+			case '0': return RawKeycode::_0;
+			case B_BACKSPACE: return RawKeycode::Backspace;
+			case B_TAB: return RawKeycode::Tab;
+			case 'Q': return RawKeycode::Q;
+			case 'W': return RawKeycode::W;
+			case 'E': return RawKeycode::E;
+			case 'R': return RawKeycode::R;
+			case 'T': return RawKeycode::T;
+			case 'Y': return RawKeycode::Y;
+			case 'U': return RawKeycode::U;
+			case 'I': return RawKeycode::I;
+			case 'O': return RawKeycode::O;
+			case 'P': return RawKeycode::P;
+			case B_RETURN: return RawKeycode::Return;
+			case 'A': return RawKeycode::A;
+			case 'S': return RawKeycode::S;
+			case 'D': return RawKeycode::D;
+			case 'F': return RawKeycode::F;
+			case 'G': return RawKeycode::G;
+			case 'H': return RawKeycode::H;
+			case 'J': return RawKeycode::J;
+			case 'K': return RawKeycode::K;
+			case 'L': return RawKeycode::L;
+			case 'Z': return RawKeycode::Z;
+			case 'X': return RawKeycode::X;
+			case 'C': return RawKeycode::C;
+			case 'V': return RawKeycode::V;
+			case 'B': return RawKeycode::B;
+			case 'N': return RawKeycode::N;
+			case 'M': return RawKeycode::M;
+			case B_SPACE: return RawKeycode::Space;
+			case B_F1_KEY: return RawKeycode::F1;
+			case B_F2_KEY: return RawKeycode::F2;
+			case B_F3_KEY: return RawKeycode::F3;
+			case B_F4_KEY: return RawKeycode::F4;
+			case B_F5_KEY: return RawKeycode::F5;
+			case B_F6_KEY: return RawKeycode::F6;
+			case B_F7_KEY: return RawKeycode::F7;
+			case B_F8_KEY: return RawKeycode::F8;
+			case B_F9_KEY: return RawKeycode::F9;
+			case B_F10_KEY: return RawKeycode::F10;
+			case B_HOME: return RawKeycode::Home;
+			case B_UP_ARROW: return RawKeycode::Up;
+			case B_PAGE_UP: return RawKeycode::Prior;
+			case B_LEFT_ARROW: return RawKeycode::Left;
+			case B_RIGHT_ARROW: return RawKeycode::Right;
+			case B_END: return RawKeycode::End;
+			case B_DOWN_ARROW: return RawKeycode::Down;
+			case B_PAGE_DOWN: return RawKeycode::Next;
+			case B_INSERT: return RawKeycode::Insert;
+			case B_DELETE: return RawKeycode::Delete;
+			case B_F11_KEY: return RawKeycode::F11;
+			case B_F12_KEY: return RawKeycode::F12;
+			default: return RawKeycode::None;
+		}
+	}
+
 	HaikuDisplayWindow* DisplayWindow = nullptr;
 };
 
@@ -310,6 +472,28 @@ public:
 				DisplayWindow->WindowHost->OnWindowActivated();
 			else
 				DisplayWindow->WindowHost->OnWindowDeactivated();
+		}
+	}
+
+	virtual void MessageReceived(BMessage* message) override
+	{
+		if (message->what == ZWIDGET_TIMER_MSG)
+		{
+			// Extract timer ID from message
+			void* timerID = nullptr;
+			if (message->FindPointer("timer_id", &timerID) == B_OK)
+			{
+				// Find and execute the timer callback
+				auto it = HaikuDisplayWindow::Timers.find(timerID);
+				if (it != HaikuDisplayWindow::Timers.end())
+				{
+					it->second();  // Execute callback
+				}
+			}
+		}
+		else
+		{
+			BWindow::MessageReceived(message);
 		}
 	}
 
@@ -384,7 +568,72 @@ void HaikuDisplayWindow::SetWindowTitle(const std::string& text)
 
 void HaikuDisplayWindow::SetWindowIcon(const std::vector<std::shared_ptr<Image>>& images)
 {
-	// Stub: Icon support would be implemented here
+#ifdef __HAIKU__
+	if (!Handle.window || images.empty())
+		return;
+
+	// Haiku prefers 32x32 icons, but we'll try to find the best match
+	std::shared_ptr<Image> bestIcon;
+	int bestSize = 0;
+	int targetSize = 32;
+
+	// Find the icon closest to 32x32
+	for (const auto& image : images)
+	{
+		if (!image)
+			continue;
+
+		int size = std::min(image->GetWidth(), image->GetHeight());
+		if (bestIcon == nullptr || std::abs(size - targetSize) < std::abs(bestSize - targetSize))
+		{
+			bestIcon = image;
+			bestSize = size;
+		}
+	}
+
+	if (!bestIcon)
+		return;
+
+	// Create BBitmap from the Image
+	int width = bestIcon->GetWidth();
+	int height = bestIcon->GetHeight();
+	BBitmap* bitmap = new BBitmap(BRect(0, 0, width - 1, height - 1), B_RGBA32);
+
+	if (bitmap && bitmap->IsValid())
+	{
+		// Copy image data to bitmap
+		// Image data is in RGBA format, BBitmap expects BGRA
+		uint8_t* bitmapData = (uint8_t*)bitmap->Bits();
+		const uint32_t* imageData = bestIcon->GetData();
+		int32 bitmapBytesPerRow = bitmap->BytesPerRow();
+
+		for (int y = 0; y < height; y++)
+		{
+			for (int x = 0; x < width; x++)
+			{
+				uint32_t pixel = imageData[y * width + x];
+				uint8_t r = (pixel >> 16) & 0xFF;
+				uint8_t g = (pixel >> 8) & 0xFF;
+				uint8_t b = pixel & 0xFF;
+				uint8_t a = (pixel >> 24) & 0xFF;
+
+				// Write as BGRA
+				int offset = y * bitmapBytesPerRow + x * 4;
+				bitmapData[offset + 0] = b;
+				bitmapData[offset + 1] = g;
+				bitmapData[offset + 2] = r;
+				bitmapData[offset + 3] = a;
+			}
+		}
+
+		// Note: BWindow doesn't have a built-in SetIcon method in all Haiku versions
+		// This is primarily for window manager/task switcher decoration
+		// Some applications use the application signature's icon instead
+		// For now, we'll keep the bitmap but won't set it as there's no reliable API
+
+		delete bitmap;
+	}
+#endif
 }
 
 void HaikuDisplayWindow::SetWindowFrame(const Rect& box)
@@ -590,7 +839,88 @@ bool HaikuDisplayWindow::GetKeyState(InputKey key)
 
 void HaikuDisplayWindow::SetCursor(StandardCursor cursor, std::shared_ptr<CustomCursor> custom)
 {
-	// Stub: Cursor changes would be implemented here
+#ifdef __HAIKU__
+	if (!Handle.window || !Handle.view)
+		return;
+
+	BCursor* bcursor = nullptr;
+
+	// If custom cursor is provided, try to use it
+	// Note: Haiku has limited custom cursor support, so we'll fall back to standard cursors
+	if (custom)
+	{
+		// Custom cursor support on Haiku is complex and would require
+		// converting the image data to BCursor format
+		// For now, fall back to arrow cursor
+		bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+	}
+	else
+	{
+		// Map StandardCursor to Haiku BCursor constants
+		switch (cursor)
+		{
+			case StandardCursor::arrow:
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+			case StandardCursor::appstarting:
+				// Haiku doesn't have a direct equivalent, use default
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+			case StandardCursor::cross:
+				// Use default as Haiku doesn't have a crosshair cursor
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+			case StandardCursor::hand:
+				// Use default as Haiku doesn't have a hand cursor
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+			case StandardCursor::ibeam:
+				bcursor = new BCursor(B_CURSOR_I_BEAM);
+				break;
+			case StandardCursor::no:
+				// Haiku doesn't have a "no" cursor, use default
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+			case StandardCursor::size_all:
+				// Use default for move cursor
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+			case StandardCursor::size_nesw:
+				bcursor = new BCursor(B_CURSOR_RESIZE_NORTH_EAST_SOUTH_WEST);
+				break;
+			case StandardCursor::size_ns:
+				bcursor = new BCursor(B_CURSOR_RESIZE_NORTH_SOUTH);
+				break;
+			case StandardCursor::size_nwse:
+				bcursor = new BCursor(B_CURSOR_RESIZE_NORTH_WEST_SOUTH_EAST);
+				break;
+			case StandardCursor::size_we:
+				bcursor = new BCursor(B_CURSOR_RESIZE_EAST_WEST);
+				break;
+			case StandardCursor::uparrow:
+				// Use default as Haiku doesn't have an up arrow cursor
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+			case StandardCursor::wait:
+				// Haiku doesn't have a wait cursor, use default
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+			default:
+				bcursor = new BCursor(B_CURSOR_SYSTEM_DEFAULT);
+				break;
+		}
+	}
+
+	// Apply the cursor to the view
+	if (bcursor && Handle.view->LockLooper())
+	{
+		Handle.view->SetViewCursor(bcursor);
+		Handle.view->UnlockLooper();
+	}
+
+	// Note: BCursor is copied by SetViewCursor, so we can delete it
+	delete bcursor;
+#endif
 }
 
 Rect HaikuDisplayWindow::GetWindowFrame() const
@@ -921,15 +1251,68 @@ void HaikuDisplayWindow::ExitLoop()
 
 void* HaikuDisplayWindow::StartTimer(int timeoutMilliseconds, std::function<void()> onTimer)
 {
-	// Stub: Basic timer support
+#ifdef __HAIKU__
+	if (!be_app)
+		return nullptr;
+
+	// Create unique timer ID
+	void* id = reinterpret_cast<void*>(++TimerIDs);
+
+	// Store the callback
+	Timers[id] = std::move(onTimer);
+
+	// Create timer message with timer ID embedded
+	BMessage timerMsg(ZWIDGET_TIMER_MSG);
+	timerMsg.AddPointer("timer_id", id);
+
+	// Create BMessageRunner to send repeated timer messages
+	// Interval is in microseconds, so multiply milliseconds by 1000
+	bigtime_t interval = timeoutMilliseconds * 1000;
+	BMessenger target(be_app);
+	BMessageRunner* runner = new BMessageRunner(target, &timerMsg, interval);
+
+	if (runner && runner->InitCheck() == B_OK)
+	{
+		TimerRunners[id] = runner;
+		return id;
+	}
+	else
+	{
+		// Failed to create timer
+		delete runner;
+		Timers.erase(id);
+		return nullptr;
+	}
+#else
+	// Stub for non-Haiku platforms
 	void* id = reinterpret_cast<void*>(++TimerIDs);
 	Timers[id] = std::move(onTimer);
-	// In a real implementation, this would use BMessageRunner
 	return id;
+#endif
 }
 
 void HaikuDisplayWindow::StopTimer(void* timerID)
 {
-	// Stub: Remove timer
+#ifdef __HAIKU__
+	// Stop and delete the BMessageRunner
+	auto runnerIt = TimerRunners.find(timerID);
+	if (runnerIt != TimerRunners.end())
+	{
+		delete runnerIt->second;
+		TimerRunners.erase(runnerIt);
+	}
+#endif
+
+	// Remove the callback
 	Timers.erase(timerID);
+}
+
+void HaikuDisplayWindow::CreateApplication()
+{
+#ifdef __HAIKU__
+	if (!be_app)
+	{
+		new ZWidgetApplication("application/x-vnd.ZWidget");
+	}
+#endif
 }
