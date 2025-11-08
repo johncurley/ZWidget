@@ -12,11 +12,12 @@ HaikuDisplayBackend::HaikuDisplayBackend()
 #ifdef __HAIKU__
 	// Initialize HaikuOS backend
 	// Create BApplication if it doesn't exist
+	// This is required for BWindow to work properly
 	if (!be_app)
 	{
-		// Note: BApplication needs a signature
-		// In a real application, this should be done by the host application
-		// new BApplication("application/x-vnd.ZWidget");
+		// Create BApplication with a proper signature
+		// Note: This creates be_app global which BWindow/BView need
+		new BApplication("application/x-vnd.ZWidget");
 	}
 
 	UIScale = 1.0;
