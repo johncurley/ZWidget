@@ -31,6 +31,14 @@ public:
 	{
 	}
 
+	virtual void AttachedToWindow() override
+	{
+		BView::AttachedToWindow();
+		// Enable mouse tracking even when mouse buttons aren't pressed
+		// This is critical for getting MouseMoved events
+		SetEventMask(B_POINTER_EVENTS, B_NO_POINTER_HISTORY);
+	}
+
 	virtual void Draw(BRect updateRect) override
 	{
 		if (DisplayWindow && DisplayWindow->WindowHost)
@@ -115,21 +123,28 @@ public:
 	{
 		if (DisplayWindow && DisplayWindow->WindowHost)
 		{
-			// Get key code from message
+			// Get key code and modifiers from message
 			BMessage* msg = Window()->CurrentMessage();
 			if (msg)
 			{
 				int32 rawChar = 0;
-				int32 key = 0;
+				int32 modifiers = 0;
+				msg->FindInt32("modifiers", &modifiers);
+
 				if (msg->FindInt32("raw_char", &rawChar) == B_OK)
 				{
+					// Store modifiers in DisplayWindow for GetKeyState
+					DisplayWindow->CurrentModifiers = modifiers;
+
 					// Map Haiku key codes to InputKey
-					// This is a simplified mapping - full implementation would need complete key table
 					InputKey inputKey = MapHaikuKeyToInputKey(rawChar);
 					if (inputKey != InputKey::None)
 					{
 						DisplayWindow->WindowHost->OnWindowKeyDown(inputKey);
 					}
+
+					// Also check modifier keys themselves
+					CheckModifierKeys(modifiers, true);
 				}
 			}
 
@@ -149,13 +164,22 @@ public:
 			if (msg)
 			{
 				int32 rawChar = 0;
+				int32 modifiers = 0;
+				msg->FindInt32("modifiers", &modifiers);
+
 				if (msg->FindInt32("raw_char", &rawChar) == B_OK)
 				{
+					// Update stored modifiers
+					DisplayWindow->CurrentModifiers = modifiers;
+
 					InputKey inputKey = MapHaikuKeyToInputKey(rawChar);
 					if (inputKey != InputKey::None)
 					{
 						DisplayWindow->WindowHost->OnWindowKeyUp(inputKey);
 					}
+
+					// Also check modifier keys themselves
+					CheckModifierKeys(modifiers, false);
 				}
 			}
 		}
@@ -173,6 +197,33 @@ public:
 			else if (deltaY < 0)
 			{
 				DisplayWindow->WindowHost->OnWindowMouseWheel(Point(where.x, where.y), InputKey::MouseWheelUp);
+			}
+		}
+	}
+
+	void CheckModifierKeys(int32 modifiers, bool down)
+	{
+		// Fire events for modifier keys
+		if (DisplayWindow && DisplayWindow->WindowHost)
+		{
+			// Track shift, control, alt states
+			if (down)
+			{
+				if (modifiers & B_SHIFT_KEY)
+					DisplayWindow->WindowHost->OnWindowKeyDown(InputKey::Shift);
+				if (modifiers & B_CONTROL_KEY)
+					DisplayWindow->WindowHost->OnWindowKeyDown(InputKey::Control);
+				if (modifiers & B_COMMAND_KEY)  // Alt/Command on Haiku
+					DisplayWindow->WindowHost->OnWindowKeyDown(InputKey::Menu);
+			}
+			else
+			{
+				if (!(modifiers & B_SHIFT_KEY))
+					DisplayWindow->WindowHost->OnWindowKeyUp(InputKey::Shift);
+				if (!(modifiers & B_CONTROL_KEY))
+					DisplayWindow->WindowHost->OnWindowKeyUp(InputKey::Control);
+				if (!(modifiers & B_COMMAND_KEY))
+					DisplayWindow->WindowHost->OnWindowKeyUp(InputKey::Menu);
 			}
 		}
 	}
@@ -507,8 +558,34 @@ void HaikuDisplayWindow::Update()
 
 bool HaikuDisplayWindow::GetKeyState(InputKey key)
 {
-	// Stub: Always return false
+#ifdef __HAIKU__
+	// Check modifier keys using cached state
+	switch (key)
+	{
+		case InputKey::Shift:
+		case InputKey::LShift:
+		case InputKey::RShift:
+			return (CurrentModifiers & B_SHIFT_KEY) != 0;
+
+		case InputKey::Control:
+		case InputKey::LControl:
+		case InputKey::RControl:
+			return (CurrentModifiers & B_CONTROL_KEY) != 0;
+
+		case InputKey::Menu:  // Alt/Command
+			return (CurrentModifiers & B_COMMAND_KEY) != 0;
+
+		case InputKey::CapsLock:
+			return (CurrentModifiers & B_CAPS_LOCK) != 0;
+
+		default:
+			// For other keys, we'd need to track state ourselves
+			// This is a limitation of the current implementation
+			return false;
+	}
+#else
 	return false;
+#endif
 }
 
 void HaikuDisplayWindow::SetCursor(StandardCursor cursor, std::shared_ptr<CustomCursor> custom)

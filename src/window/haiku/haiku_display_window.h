@@ -80,6 +80,7 @@ public:
 	double UIScale = 1.0;
 	bool CursorLocked = false;
 	bool isFullscreen = false;
+	int32 CurrentModifiers = 0;  // Track current modifier key state
 
 	Rect WindowFrame;
 	Size ClientSize;

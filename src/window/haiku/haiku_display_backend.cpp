@@ -36,6 +36,18 @@ HaikuDisplayBackend::HaikuDisplayBackend()
 
 HaikuDisplayBackend::~HaikuDisplayBackend()
 {
+#ifdef __HAIKU__
+	// Properly quit the BApplication if we created it
+	if (be_app)
+	{
+		if (be_app->Lock())
+		{
+			be_app->Quit();
+		}
+		// Note: be_app will be deleted by BApplication::Quit()
+		// Don't delete it manually
+	}
+#endif
 }
 
 std::unique_ptr<DisplayWindow> HaikuDisplayBackend::Create(DisplayWindowHost* windowHost, bool popupWindow, DisplayWindow* owner, RenderAPI renderAPI)
